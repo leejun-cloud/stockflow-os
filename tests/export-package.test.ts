@@ -1,14 +1,16 @@
-import { mkdtemp, writeFile, readFile } from 'node:fs/promises';
+import { mkdtemp, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import JSZip from 'jszip';
 import type { AssetRecord } from '../src/lib/domain';
-import { createSubmissionPackage } from '../src/lib/exporter';
+import { buildSubmissionArchive } from '../src/lib/exporter';
 
 const asset: AssetRecord = {
   id: 'asset-zip',
+  userId: 'user-1',
   originalFilename: 'sample.jpg',
+  storageBackend: 'local',
   storagePath: '',
   mimeType: 'image/jpeg',
   fileSize: 12,
@@ -28,17 +30,13 @@ describe('submission package exporter', () => {
     const sourceFile = path.join(dir, 'sample.jpg');
     await writeFile(sourceFile, 'fake-image-content');
 
-    const zipPath = await createSubmissionPackage('adobe', {
-      ...asset,
-      storagePath: sourceFile,
-    }, dir);
-
-    const zipBytes = await readFile(zipPath);
-    const zip = await JSZip.loadAsync(zipBytes);
+    const archive = await buildSubmissionArchive('adobe', { ...asset, storagePath: sourceFile });
+    const zip = await JSZip.loadAsync(archive.bytes);
     const files = Object.keys(zip.files).sort();
 
     expect(files).toContain('metadata.json');
     expect(files).toContain('sample.jpg');
+    expect(archive.fileName).toContain('adobe');
 
     const metadata = JSON.parse(await zip.file('metadata.json')!.async('string'));
     expect(metadata.platform).toBe('adobe');

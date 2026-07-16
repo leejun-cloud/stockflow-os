@@ -4,7 +4,9 @@ import type { AssetRecord } from '../src/lib/domain';
 
 const baseAsset: AssetRecord = {
   id: 'asset-1',
+  userId: 'user-1',
   originalFilename: 'sample.jpg',
+  storageBackend: 'local',
   storagePath: '/tmp/sample.jpg',
   mimeType: 'image/jpeg',
   fileSize: 12345,
@@ -21,15 +23,12 @@ const baseAsset: AssetRecord = {
 describe('platform adapters', () => {
   it('keeps only 49 keywords for Adobe and preserves order', () => {
     const keywords = Array.from({ length: 60 }, (_, index) => `kw-${index + 1}`);
-    const payload = buildPlatformPayload('adobe', {
-      ...baseAsset,
-      keywords,
-    });
-
+    const payload = buildPlatformPayload('adobe', { ...baseAsset, keywords });
+    const adobeKeywords = payload.metadata.keywords as string[];
     expect(payload.platform).toBe('adobe');
-    expect(payload.metadata.keywords).toHaveLength(49);
-    expect(payload.metadata.keywords[0]).toBe('kw-1');
-    expect(payload.metadata.keywords.at(-1)).toBe('kw-49');
+    expect(adobeKeywords).toHaveLength(49);
+    expect(adobeKeywords[0]).toBe('kw-1');
+    expect(adobeKeywords.at(-1)).toBe('kw-49');
   });
 
   it('marks Shutterstock export as editorial when releases are missing', () => {
@@ -39,11 +38,7 @@ describe('platform adapters', () => {
   });
 
   it('marks Adobe export as commercial when a release is attached', () => {
-    const payload = buildPlatformPayload('adobe', {
-      ...baseAsset,
-      releaseStatus: 'model_attached',
-    });
-
+    const payload = buildPlatformPayload('adobe', { ...baseAsset, releaseStatus: 'model_attached' });
     expect(payload.metadata.licenseMode).toBe('commercial');
   });
 });

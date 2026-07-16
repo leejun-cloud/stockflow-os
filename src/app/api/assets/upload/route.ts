@@ -1,15 +1,17 @@
-import { randomUUID } from 'node:crypto';
-import path from 'node:path';
-import { writeFile } from 'node:fs/promises';
 import { imageSize } from 'image-size';
 import { NextResponse } from 'next/server';
+import { getCurrentUser } from '@/lib/auth';
 import { createAsset } from '@/lib/repository';
-import { uploadsDir } from '@/lib/db';
-import { sanitizeFilename } from '@/lib/utils';
+import { saveUploadObject } from '@/lib/storage';
 
 export const runtime = 'nodejs';
 
 export async function POST(request: Request) {
+  const user = await getCurrentUser();
+  if (!user) {
+    return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
+  }
+
   const formData = await request.formData();
   const uploaded = formData.get('file');
 
@@ -21,20 +23,17 @@ export async function POST(request: Request) {
   const description = String(formData.get('description') || '').trim();
   const keywordText = String(formData.get('keywords') || '').trim();
   const releaseStatus = String(formData.get('releaseStatus') || 'none');
-  const keywords = keywordText
-    .split(',')
-    .map((item) => item.trim())
-    .filter(Boolean);
+  const keywords = keywordText.split(',').map((item) => item.trim()).filter(Boolean);
 
-  const fileName = `${randomUUID()}-${sanitizeFilename(uploaded.name)}`;
-  const storagePath = path.join(uploadsDir, fileName);
   const bytes = Buffer.from(await uploaded.arrayBuffer());
-  await writeFile(storagePath, bytes);
+  const stored = await saveUploadObject({ ownerId: user.id, fileName: uploaded.name, mimeType: uploaded.type || 'application/octet-stream', bytes });
   const dimensions = imageSize(bytes);
 
-  const asset = createAsset({
+  const asset = await createAsset({
+    userId: user.id,
     originalFilename: uploaded.name,
-    storagePath,
+    storageBackend: stored.backend,
+    storagePath: stored.path,
     mimeType: uploaded.type || 'application/octet-stream',
     fileSize: uploaded.size,
     width: dimensions.width ?? null,

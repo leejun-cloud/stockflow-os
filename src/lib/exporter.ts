@@ -1,27 +1,24 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
-import path from 'node:path';
 import JSZip from 'jszip';
 import type { AssetRecord, PlatformKey } from './domain';
 import { buildPlatformPayload } from './adapters';
+import { readStoredObject } from './storage';
 import { sanitizeFilename } from './utils';
 
-export async function createSubmissionPackage(platform: PlatformKey, asset: AssetRecord, outputDir: string) {
-  await mkdir(outputDir, { recursive: true });
-
+export async function buildSubmissionArchive(platform: PlatformKey, asset: AssetRecord) {
   const payload = buildPlatformPayload(platform, asset);
   const zip = new JSZip();
   const originalName = sanitizeFilename(asset.originalFilename);
-  const sourceBytes = await readFile(asset.storagePath);
+  const sourceBytes = await readStoredObject(asset.storageBackend, asset.storagePath);
 
   zip.file(originalName, sourceBytes);
   zip.file('metadata.json', JSON.stringify(payload, null, 2));
   zip.file('README.txt', payload.instructions.join('\n'));
+  zip.file(`${platform}-payload.json`, JSON.stringify(payload.metadata, null, 2));
 
-  const platformFile = `${platform}-payload.json`;
-  zip.file(platformFile, JSON.stringify(payload.metadata, null, 2));
-
-  const zipBytes = await zip.generateAsync({ type: 'nodebuffer' });
-  const zipPath = path.join(outputDir, `${payload.exportBaseName}.zip`);
-  await writeFile(zipPath, zipBytes);
-  return zipPath;
+  const bytes = await zip.generateAsync({ type: 'nodebuffer' });
+  return {
+    bytes,
+    payload,
+    fileName: `${payload.exportBaseName}.zip`,
+  };
 }

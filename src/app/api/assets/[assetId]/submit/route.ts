@@ -1,11 +1,9 @@
-import path from 'node:path';
-import { mkdir } from 'node:fs/promises';
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
-import { getAssetById, createSubmission } from '@/lib/repository';
-import { createSubmissionPackage } from '@/lib/exporter';
-import { exportsDir } from '@/lib/db';
-import { buildPlatformPayload } from '@/lib/adapters';
+import { getCurrentUser } from '@/lib/auth';
+import { buildSubmissionArchive } from '@/lib/exporter';
+import { createSubmission, getAssetByIdForUser } from '@/lib/repository';
+import { saveExportObject } from '@/lib/storage';
 
 export const runtime = 'nodejs';
 
@@ -14,32 +12,40 @@ const submitSchema = z.object({
 });
 
 export async function POST(request: Request, context: { params: Promise<{ assetId: string }> }) {
+  const user = await getCurrentUser();
+  if (!user) {
+    return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
+  }
+
   const { assetId } = await context.params;
   const parsed = submitSchema.safeParse(await request.json());
-
   if (!parsed.success) {
     return NextResponse.json({ error: 'invalid platform' }, { status: 400 });
   }
 
-  const asset = getAssetById(assetId);
+  const asset = await getAssetByIdForUser(user.id, assetId);
   if (!asset) {
     return NextResponse.json({ error: 'asset not found' }, { status: 404 });
   }
 
-  const outputDir = path.join(exportsDir, asset.id, parsed.data.platform);
-  await mkdir(outputDir, { recursive: true });
-  const zipPath = await createSubmissionPackage(parsed.data.platform, asset, outputDir);
-  const payload = buildPlatformPayload(parsed.data.platform, asset);
-  const submission = createSubmission({
+  const archive = await buildSubmissionArchive(parsed.data.platform, asset);
+  const stored = await saveExportObject({
+    ownerId: user.id,
     assetId: asset.id,
     platform: parsed.data.platform,
-    status: 'exported',
-    exportPath: zipPath,
-    payloadJson: JSON.stringify(payload),
+    fileName: archive.fileName,
+    bytes: archive.bytes,
   });
 
-  return NextResponse.json({
-    submission,
-    downloadUrl: `/api/submissions/${submission.id}/download`,
+  const submission = await createSubmission({
+    assetId: asset.id,
+    userId: user.id,
+    platform: parsed.data.platform,
+    status: 'exported',
+    exportBackend: stored.backend,
+    exportPath: stored.path,
+    payloadJson: JSON.stringify(archive.payload),
   });
+
+  return NextResponse.json({ submission, downloadUrl: `/api/submissions/${submission.id}/download` });
 }
