@@ -1,36 +1,42 @@
 import Link from 'next/link';
+import { listAssets } from '@/lib/repository';
+import { StockDashboardClient } from '@/components/stock-dashboard-client';
 
 const highlights = [
   {
-    title: '운영 시간 절감',
-    body: '플랫폼별 반복 입력과 제출 흐름을 하나의 대시보드로 묶어 반복 노동을 줄입니다.',
+    title: '실제 파일 업로드',
+    body: '이미지를 서버 디스크와 로컬 DB에 저장하고 자산 목록으로 관리합니다.',
   },
   {
-    title: '승인율 최적화',
-    body: '품질 점검, 릴리스 누락 경고, 반려 사유 학습을 통해 심사 통과 가능성을 높입니다.',
+    title: '플랫폼별 메타데이터 변환',
+    body: 'Adobe, Shutterstock, Alamy, Getty/iStock용 payload를 실제 코드로 생성합니다.',
   },
   {
-    title: '팀 워크플로우',
-    body: '작가·운영자·검수자의 역할을 나누고 자산별 진행 상태를 명확하게 관리합니다.',
+    title: '실제 제출 패키지 생성',
+    body: '원본 파일 + metadata.json + 플랫폼별 payload를 zip으로 묶어 바로 다운로드합니다.',
   },
 ];
 
 const roadmap = [
-  '1단계: Adobe / Shutterstock / Alamy 중심 MVP',
-  '2단계: 반려 사유 정규화와 재제출 추천 엔진',
-  '3단계: 팀 계정, 성과 분석, 수익성 대시보드',
-  '4단계: Getty/iStock 및 추가 플랫폼 어댑터 확장',
+  '로컬 저장 기반 운영 → 추후 PostgreSQL/S3로 확장',
+  '플랫폼별 export package → 추후 인증/브라우저 자동화 연결',
+  '반려 사유/승인율 학습 엔진 추가',
+  '팀 계정 및 워크플로우 분리',
 ];
 
+export const dynamic = 'force-dynamic';
+
 export default function HomePage() {
+  const assets = listAssets();
+
   return (
     <div className="page-grid">
       <section className="hero card">
         <span className="eyebrow">Stock-photo contributor SaaS</span>
-        <h1>멀티 플랫폼 스톡사진 제출 운영을 한 곳에서 관리하는 SaaS</h1>
+        <h1>실제 업로드, 실제 스키마, 실제 어댑터가 들어간 StockFlow OS</h1>
         <p className="lead">
-          StockFlow OS는 스톡사진 판매자를 위한 운영 도구입니다. 사진 품질 점검, 권리/릴리스 확인,
-          메타데이터 생성, 플랫폼별 제출 준비, 심사 추적까지 하나의 흐름으로 연결합니다.
+          지금 이 빌드는 단순 소개 페이지가 아니라 동작하는 프로토타입입니다. 자산 업로드, DB 저장,
+          플랫폼별 메타데이터 변환, 제출 패키지 export까지 실제로 실행됩니다.
         </p>
         <div className="actions">
           <Link className="button primary" href="/manual">
@@ -43,7 +49,7 @@ export default function HomePage() {
       </section>
 
       <section className="card section">
-        <h2>왜 이 서비스인가</h2>
+        <h2>현재 구현된 실제 기능</h2>
         <div className="feature-grid">
           {highlights.map((item) => (
             <article key={item.title} className="feature-card">
@@ -54,19 +60,21 @@ export default function HomePage() {
         </div>
       </section>
 
+      <StockDashboardClient initialAssets={assets} />
+
       <section className="card section two-col">
         <div>
-          <h2>핵심 기능</h2>
+          <h2>핵심 구현 범위</h2>
           <ul className="list">
-            <li>사진 품질 및 중복 위험 사전 점검</li>
-            <li>모델/프로퍼티 릴리스 연결 상태 확인</li>
-            <li>Adobe, Shutterstock, Alamy용 메타데이터 파생</li>
-            <li>제출 상태, 반려 사유, 재업로드 히스토리 추적</li>
-            <li>팀 단위 큐 관리와 역할 분리</li>
+            <li>SQLite 스키마 (`assets`, `submissions`, `submission_attempts`)</li>
+            <li>실제 이미지 업로드 API와 디스크 저장</li>
+            <li>플랫폼별 metadata payload 생성기</li>
+            <li>zip export 및 다운로드 API</li>
+            <li>UI 기반 asset/submission 확인</li>
           </ul>
         </div>
         <div>
-          <h2>추천 로드맵</h2>
+          <h2>다음 확장 순서</h2>
           <ol className="list ordered">
             {roadmap.map((item) => (
               <li key={item}>{item}</li>

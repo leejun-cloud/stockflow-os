@@ -1,0 +1,47 @@
+import { mkdtemp, writeFile, readFile } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import { describe, expect, it } from 'vitest';
+import JSZip from 'jszip';
+import type { AssetRecord } from '../src/lib/domain';
+import { createSubmissionPackage } from '../src/lib/exporter';
+
+const asset: AssetRecord = {
+  id: 'asset-zip',
+  originalFilename: 'sample.jpg',
+  storagePath: '',
+  mimeType: 'image/jpeg',
+  fileSize: 12,
+  width: 200,
+  height: 100,
+  title: 'Library class scene',
+  description: 'Students learning together.',
+  keywords: ['library', 'students'],
+  releaseStatus: 'none',
+  createdAt: '2026-07-16T00:00:00.000Z',
+  updatedAt: '2026-07-16T00:00:00.000Z',
+};
+
+describe('submission package exporter', () => {
+  it('creates a zip that includes the original file and metadata json', async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'stockflow-test-'));
+    const sourceFile = path.join(dir, 'sample.jpg');
+    await writeFile(sourceFile, 'fake-image-content');
+
+    const zipPath = await createSubmissionPackage('adobe', {
+      ...asset,
+      storagePath: sourceFile,
+    }, dir);
+
+    const zipBytes = await readFile(zipPath);
+    const zip = await JSZip.loadAsync(zipBytes);
+    const files = Object.keys(zip.files).sort();
+
+    expect(files).toContain('metadata.json');
+    expect(files).toContain('sample.jpg');
+
+    const metadata = JSON.parse(await zip.file('metadata.json')!.async('string'));
+    expect(metadata.platform).toBe('adobe');
+    expect(metadata.assetId).toBe('asset-zip');
+  });
+});
