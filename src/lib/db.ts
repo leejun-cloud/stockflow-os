@@ -1,8 +1,13 @@
 import path from 'node:path';
 import { mkdirSync, readFileSync } from 'node:fs';
+import os from 'node:os';
 import Database from 'better-sqlite3';
 
-const dataDir = path.join(process.cwd(), '.data');
+const baseDataDir = process.env.VERCEL
+  ? path.join(os.tmpdir(), 'stockflow-os')
+  : path.join(process.cwd(), '.data');
+
+const dataDir = baseDataDir;
 const uploadsDir = path.join(dataDir, 'uploads');
 const exportsDir = path.join(dataDir, 'exports');
 const dbPath = path.join(dataDir, 'stockflow.db');
