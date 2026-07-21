@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest';
 import JSZip from 'jszip';
 import type { AssetRecord } from '../src/lib/domain';
 import { buildSubmissionArchive } from '../src/lib/exporter';
+import { tinyJpeg } from './tiny-jpeg';
 
 const asset: AssetRecord = {
   id: 'asset-zip',
@@ -13,9 +14,11 @@ const asset: AssetRecord = {
   storageBackend: 'local',
   storagePath: '',
   mimeType: 'image/jpeg',
+  mediaType: 'image',
   fileSize: 12,
   width: 200,
   height: 100,
+  durationSeconds: null,
   title: 'Library class scene',
   description: 'Students learning together.',
   keywords: ['library', 'students'],
@@ -28,7 +31,7 @@ describe('submission package exporter', () => {
   it('creates a zip that includes the original file and metadata json', async () => {
     const dir = await mkdtemp(path.join(os.tmpdir(), 'stockflow-test-'));
     const sourceFile = path.join(dir, 'sample.jpg');
-    await writeFile(sourceFile, 'fake-image-content');
+    await writeFile(sourceFile, tinyJpeg);
 
     const archive = await buildSubmissionArchive('adobe', { ...asset, storagePath: sourceFile });
     const zip = await JSZip.loadAsync(archive.bytes);

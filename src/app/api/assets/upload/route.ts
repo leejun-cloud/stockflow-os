@@ -3,6 +3,7 @@ import { NextResponse } from 'next/server';
 import { getCurrentUser } from '@/lib/auth';
 import { createAsset } from '@/lib/repository';
 import { saveUploadObject } from '@/lib/storage';
+import { mediaTypeFromMime } from '@/lib/utils';
 
 export const runtime = 'nodejs';
 
@@ -26,18 +27,22 @@ export async function POST(request: Request) {
   const keywords = keywordText.split(',').map((item) => item.trim()).filter(Boolean);
 
   const bytes = Buffer.from(await uploaded.arrayBuffer());
-  const stored = await saveUploadObject({ ownerId: user.id, fileName: uploaded.name, mimeType: uploaded.type || 'application/octet-stream', bytes });
-  const dimensions = imageSize(bytes);
+  const mimeType = uploaded.type || 'application/octet-stream';
+  const mediaType = mediaTypeFromMime(mimeType);
+  const stored = await saveUploadObject({ ownerId: user.id, fileName: uploaded.name, mimeType, bytes });
+  const dimensions = mediaType === 'image' ? imageSize(bytes) : { width: undefined, height: undefined };
 
   const asset = await createAsset({
     userId: user.id,
     originalFilename: uploaded.name,
     storageBackend: stored.backend,
     storagePath: stored.path,
-    mimeType: uploaded.type || 'application/octet-stream',
+    mimeType,
+    mediaType,
     fileSize: uploaded.size,
     width: dimensions.width ?? null,
     height: dimensions.height ?? null,
+    durationSeconds: null,
     title,
     description,
     keywords,

@@ -23,6 +23,8 @@ CREATE TABLE IF NOT EXISTS assets (
   storage_backend TEXT NOT NULL,
   storage_path TEXT NOT NULL,
   mime_type TEXT NOT NULL,
+  media_type TEXT NOT NULL DEFAULT 'image',
+  duration_seconds INTEGER,
   file_size INTEGER NOT NULL,
   width INTEGER,
   height INTEGER,
@@ -58,6 +60,36 @@ CREATE TABLE IF NOT EXISTS submission_attempts (
   message TEXT NOT NULL,
   created_at TEXT NOT NULL,
   FOREIGN KEY(submission_id) REFERENCES submissions(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS agency_credentials (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  platform TEXT NOT NULL,
+  protocol TEXT NOT NULL,
+  host TEXT NOT NULL,
+  port INTEGER NOT NULL,
+  username TEXT NOT NULL,
+  encrypted_password TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE(user_id, platform),
+  FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS contributor_profiles (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL UNIQUE,
+  legal_name_full TEXT NOT NULL,
+  display_name TEXT NOT NULL,
+  country TEXT NOT NULL DEFAULT 'KR',
+  address_json TEXT NOT NULL,
+  phone TEXT NOT NULL,
+  tax_json TEXT NOT NULL,
+  payment_json TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
 );
 
 CREATE INDEX IF NOT EXISTS idx_sessions_token ON sessions(session_token);

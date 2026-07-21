@@ -1,4 +1,9 @@
 import path from 'node:path';
+import type { MediaType } from './domain';
+
+export function mediaTypeFromMime(mimeType: string): MediaType {
+  return mimeType.startsWith('video/') ? 'video' : 'image';
+}
 
 export function nowIso() {
   return new Date().toISOString();

@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import type { AssetRecord, PlatformKey, ReleaseStatus, StorageBackend, SubmissionRecord, UserRecord } from './domain';
+import type { AgencyCredentialRecord, AssetRecord, ContributorAddress, ContributorPayment, ContributorProfile, ContributorTax, FtpProtocol, MediaType, PlatformKey, ReleaseStatus, StorageBackend, SubmissionRecord, UserRecord } from './domain';
 import { ensureDatabase, getPg, getSqlite, usingPostgres } from './db';
 import { nowIso } from './utils';
 
@@ -30,9 +30,11 @@ function mapAssetRow(row: Record<string, unknown>): AssetRecord {
     storageBackend: String(row.storage_backend) as StorageBackend,
     storagePath: String(row.storage_path),
     mimeType: String(row.mime_type),
+    mediaType: String(row.media_type) as MediaType,
     fileSize: Number(row.file_size),
     width: row.width === null ? null : Number(row.width),
     height: row.height === null ? null : Number(row.height),
+    durationSeconds: row.duration_seconds === null || row.duration_seconds === undefined ? null : Number(row.duration_seconds),
     title: String(row.title),
     description: String(row.description),
     keywords: Array.isArray(row.keywords_json) ? (row.keywords_json as string[]) : JSON.parse(String(row.keywords_json)),
@@ -51,6 +53,21 @@ function mapSubmissionRow(row: Record<string, unknown>): SubmissionRecord {
     status: String(row.status) as 'exported' | 'failed',
     exportBackend: String(row.export_backend) as StorageBackend,
     exportPath: String(row.export_path),
+    createdAt: String(row.created_at),
+    updatedAt: String(row.updated_at),
+  };
+}
+
+function mapAgencyCredentialRow(row: Record<string, unknown>): AgencyCredentialRecord {
+  return {
+    id: String(row.id),
+    userId: String(row.user_id),
+    platform: String(row.platform) as PlatformKey,
+    protocol: String(row.protocol) as FtpProtocol,
+    host: String(row.host),
+    port: Number(row.port),
+    username: String(row.username),
+    encryptedPassword: String(row.encrypted_password),
     createdAt: String(row.created_at),
     updatedAt: String(row.updated_at),
   };
@@ -168,10 +185,10 @@ export async function createAsset(input: AssetInsert): Promise<AssetRecord> {
     const sql = getPg();
     const rows = await sql<Record<string, unknown>[]>`
       INSERT INTO assets (
-        id, user_id, original_filename, storage_backend, storage_path, mime_type,
+        id, user_id, original_filename, storage_backend, storage_path, mime_type, media_type, duration_seconds,
         file_size, width, height, title, description, keywords_json, release_status, created_at, updated_at
       ) VALUES (
-        ${id}, ${input.userId}, ${input.originalFilename}, ${input.storageBackend}, ${input.storagePath}, ${input.mimeType},
+        ${id}, ${input.userId}, ${input.originalFilename}, ${input.storageBackend}, ${input.storagePath}, ${input.mimeType}, ${input.mediaType}, ${input.durationSeconds},
         ${input.fileSize}, ${input.width}, ${input.height}, ${input.title}, ${input.description}, ${JSON.stringify(input.keywords)}::jsonb,
         ${input.releaseStatus}, ${now}, ${now}
       ) RETURNING *
@@ -182,10 +199,10 @@ export async function createAsset(input: AssetInsert): Promise<AssetRecord> {
   const db = getSqlite();
   db.prepare(
     `INSERT INTO assets (
-      id, user_id, original_filename, storage_backend, storage_path, mime_type, file_size, width, height,
+      id, user_id, original_filename, storage_backend, storage_path, mime_type, media_type, duration_seconds, file_size, width, height,
       title, description, keywords_json, release_status, created_at, updated_at
     ) VALUES (
-      @id, @user_id, @original_filename, @storage_backend, @storage_path, @mime_type, @file_size, @width, @height,
+      @id, @user_id, @original_filename, @storage_backend, @storage_path, @mime_type, @media_type, @duration_seconds, @file_size, @width, @height,
       @title, @description, @keywords_json, @release_status, @created_at, @updated_at
     )`,
   ).run({
@@ -195,6 +212,8 @@ export async function createAsset(input: AssetInsert): Promise<AssetRecord> {
     storage_backend: input.storageBackend,
     storage_path: input.storagePath,
     mime_type: input.mimeType,
+    media_type: input.mediaType,
+    duration_seconds: input.durationSeconds,
     file_size: input.fileSize,
     width: input.width,
     height: input.height,
@@ -286,6 +305,176 @@ export async function createSubmission(input: SubmissionInsert) {
      VALUES (?, ?, ?, ?, ?, ?)`,
   ).run(randomUUID(), id, 'export', input.status, input.status === 'exported' ? 'Package created' : 'Package failed', now);
   return (await getSubmissionByIdForUser(input.userId, id))!;
+}
+
+type AgencyCredentialInsert = {
+  userId: string;
+  platform: PlatformKey;
+  protocol: FtpProtocol;
+  host: string;
+  port: number;
+  username: string;
+  encryptedPassword: string;
+};
+
+export async function upsertAgencyCredential(input: AgencyCredentialInsert): Promise<AgencyCredentialRecord> {
+  await ensureDatabase();
+  const id = randomUUID();
+  const now = nowIso();
+
+  if (usingPostgres()) {
+    const sql = getPg();
+    const rows = await sql<Record<string, unknown>[]>`
+      INSERT INTO agency_credentials (id, user_id, platform, protocol, host, port, username, encrypted_password, created_at, updated_at)
+      VALUES (${id}, ${input.userId}, ${input.platform}, ${input.protocol}, ${input.host}, ${input.port}, ${input.username}, ${input.encryptedPassword}, ${now}, ${now})
+      ON CONFLICT (user_id, platform) DO UPDATE SET
+        protocol = EXCLUDED.protocol, host = EXCLUDED.host, port = EXCLUDED.port,
+        username = EXCLUDED.username, encrypted_password = EXCLUDED.encrypted_password, updated_at = EXCLUDED.updated_at
+      RETURNING *
+    `;
+    return mapAgencyCredentialRow(rows[0]);
+  }
+
+  const db = getSqlite();
+  db.prepare(
+    `INSERT INTO agency_credentials (id, user_id, platform, protocol, host, port, username, encrypted_password, created_at, updated_at)
+     VALUES (@id, @user_id, @platform, @protocol, @host, @port, @username, @encrypted_password, @created_at, @updated_at)
+     ON CONFLICT(user_id, platform) DO UPDATE SET
+       protocol = excluded.protocol, host = excluded.host, port = excluded.port,
+       username = excluded.username, encrypted_password = excluded.encrypted_password, updated_at = excluded.updated_at`,
+  ).run({
+    id,
+    user_id: input.userId,
+    platform: input.platform,
+    protocol: input.protocol,
+    host: input.host,
+    port: input.port,
+    username: input.username,
+    encrypted_password: input.encryptedPassword,
+    created_at: now,
+    updated_at: now,
+  });
+  return (await getAgencyCredential(input.userId, input.platform))!;
+}
+
+export async function getAgencyCredential(userId: string, platform: PlatformKey): Promise<AgencyCredentialRecord | null> {
+  await ensureDatabase();
+  if (usingPostgres()) {
+    const sql = getPg();
+    const rows = await sql<Record<string, unknown>[]>`SELECT * FROM agency_credentials WHERE user_id = ${userId} AND platform = ${platform} LIMIT 1`;
+    return rows[0] ? mapAgencyCredentialRow(rows[0]) : null;
+  }
+  const row = getSqlite().prepare('SELECT * FROM agency_credentials WHERE user_id = ? AND platform = ? LIMIT 1').get(userId, platform) as Record<string, unknown> | undefined;
+  return row ? mapAgencyCredentialRow(row) : null;
+}
+
+// Never returns the (encrypted) password — decryption happens only in the upload worker via getAgencyCredential.
+export async function listAgencyCredentials(userId: string): Promise<Omit<AgencyCredentialRecord, 'encryptedPassword'>[]> {
+  await ensureDatabase();
+  let rows: Record<string, unknown>[] = [];
+  if (usingPostgres()) {
+    const sql = getPg();
+    rows = await sql<Record<string, unknown>[]>`SELECT * FROM agency_credentials WHERE user_id = ${userId} ORDER BY platform`;
+  } else {
+    rows = getSqlite().prepare('SELECT * FROM agency_credentials WHERE user_id = ? ORDER BY platform').all(userId) as Record<string, unknown>[];
+  }
+  return rows.map((row) => {
+    const { encryptedPassword: _encryptedPassword, ...safe } = mapAgencyCredentialRow(row);
+    return safe;
+  });
+}
+
+function parseJsonColumn<T>(value: unknown, fallback: T): T {
+  if (value === null || value === undefined) return fallback;
+  if (typeof value === 'string') return value ? (JSON.parse(value) as T) : fallback;
+  return value as T;
+}
+
+function mapContributorProfileRow(row: Record<string, unknown>): ContributorProfile {
+  return {
+    id: String(row.id),
+    userId: String(row.user_id),
+    identity: {
+      legalNameFull: String(row.legal_name_full),
+      displayName: String(row.display_name),
+      country: String(row.country),
+      phone: String(row.phone ?? ''),
+    },
+    address: parseJsonColumn<ContributorAddress>(row.address_json, { line1: '', line2: '', city: '', region: '', postalCode: '', country: '' }),
+    tax: parseJsonColumn<ContributorTax>(row.tax_json, { foreignTin: '', usTin: '' }),
+    payment: parseJsonColumn<ContributorPayment>(row.payment_json, { method: '', payoutEmail: '' }),
+    createdAt: String(row.created_at),
+    updatedAt: String(row.updated_at),
+  };
+}
+
+type ContributorProfileInsert = {
+  userId: string;
+  legalNameFull: string;
+  displayName: string;
+  country: string;
+  phone: string;
+  address: ContributorAddress;
+  tax: ContributorTax;
+  payment: ContributorPayment;
+};
+
+export async function getContributorProfile(userId: string): Promise<ContributorProfile | null> {
+  await ensureDatabase();
+  if (usingPostgres()) {
+    const sql = getPg();
+    const rows = await sql<Record<string, unknown>[]>`SELECT * FROM contributor_profiles WHERE user_id = ${userId} LIMIT 1`;
+    return rows[0] ? mapContributorProfileRow(rows[0]) : null;
+  }
+  const row = getSqlite().prepare('SELECT * FROM contributor_profiles WHERE user_id = ? LIMIT 1').get(userId) as Record<string, unknown> | undefined;
+  return row ? mapContributorProfileRow(row) : null;
+}
+
+export async function upsertContributorProfile(input: ContributorProfileInsert): Promise<ContributorProfile> {
+  await ensureDatabase();
+  const id = randomUUID();
+  const now = nowIso();
+  const addressJson = JSON.stringify(input.address);
+  const taxJson = JSON.stringify(input.tax);
+  const paymentJson = JSON.stringify(input.payment);
+
+  if (usingPostgres()) {
+    const sql = getPg();
+    const rows = await sql<Record<string, unknown>[]>`
+      INSERT INTO contributor_profiles (id, user_id, legal_name_full, display_name, country, address_json, phone, tax_json, payment_json, created_at, updated_at)
+      VALUES (${id}, ${input.userId}, ${input.legalNameFull}, ${input.displayName}, ${input.country}, ${addressJson}::jsonb, ${input.phone}, ${taxJson}::jsonb, ${paymentJson}::jsonb, ${now}, ${now})
+      ON CONFLICT (user_id) DO UPDATE SET
+        legal_name_full = EXCLUDED.legal_name_full, display_name = EXCLUDED.display_name, country = EXCLUDED.country,
+        address_json = EXCLUDED.address_json, phone = EXCLUDED.phone, tax_json = EXCLUDED.tax_json,
+        payment_json = EXCLUDED.payment_json, updated_at = EXCLUDED.updated_at
+      RETURNING *
+    `;
+    return mapContributorProfileRow(rows[0]);
+  }
+
+  getSqlite()
+    .prepare(
+      `INSERT INTO contributor_profiles (id, user_id, legal_name_full, display_name, country, address_json, phone, tax_json, payment_json, created_at, updated_at)
+       VALUES (@id, @user_id, @legal_name_full, @display_name, @country, @address_json, @phone, @tax_json, @payment_json, @created_at, @updated_at)
+       ON CONFLICT(user_id) DO UPDATE SET
+         legal_name_full = excluded.legal_name_full, display_name = excluded.display_name, country = excluded.country,
+         address_json = excluded.address_json, phone = excluded.phone, tax_json = excluded.tax_json,
+         payment_json = excluded.payment_json, updated_at = excluded.updated_at`,
+    )
+    .run({
+      id,
+      user_id: input.userId,
+      legal_name_full: input.legalNameFull,
+      display_name: input.displayName,
+      country: input.country,
+      address_json: addressJson,
+      phone: input.phone,
+      tax_json: taxJson,
+      payment_json: paymentJson,
+      created_at: now,
+      updated_at: now,
+    });
+  return (await getContributorProfile(input.userId))!;
 }
 
 export async function getSubmissionByIdForUser(userId: string, submissionId: string) {
