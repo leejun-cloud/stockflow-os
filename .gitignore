@@ -8,3 +8,9 @@ npm-debug.log*
 
 # build artifact
 tsconfig.tsbuildinfo
+
+# mvpkit firebase: 비밀파일 (커밋 금지)
+.env*.local
+*serviceAccount*.json
+*service-account*.json
+*firebase-adminsdk*.json

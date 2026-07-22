@@ -14,12 +14,6 @@ type SubmissionInsert = {
   payloadJson: string;
 };
 
-type UserInsert = {
-  email: string;
-  name: string;
-  passwordHash: string;
-};
-
 type UserWithPassword = UserRecord & { passwordHash: string };
 
 function mapAssetRow(row: Record<string, unknown>): AssetRecord {
@@ -78,7 +72,7 @@ function mapUserRow(row: Record<string, unknown>): UserWithPassword {
     id: String(row.id),
     email: String(row.email),
     name: String(row.name),
-    passwordHash: String(row.password_hash),
+    passwordHash: row.password_hash == null ? '' : String(row.password_hash),
     createdAt: String(row.created_at),
     updatedAt: String(row.updated_at),
   };
@@ -90,7 +84,18 @@ function stripPassword(user: UserWithPassword | null): UserRecord | null {
   return safe;
 }
 
-export async function createUser(input: UserInsert): Promise<UserRecord> {
+export async function getUserByFirebaseUid(firebaseUid: string): Promise<UserRecord | null> {
+  await ensureDatabase();
+  if (usingPostgres()) {
+    const sql = getPg();
+    const rows = await sql<Record<string, unknown>[]>`SELECT * FROM users WHERE firebase_uid = ${firebaseUid} LIMIT 1`;
+    return rows[0] ? stripPassword(mapUserRow(rows[0])) : null;
+  }
+  const row = getSqlite().prepare('SELECT * FROM users WHERE firebase_uid = ? LIMIT 1').get(firebaseUid) as Record<string, unknown> | undefined;
+  return row ? stripPassword(mapUserRow(row)) : null;
+}
+
+export async function createUserFromFirebase(input: { uid: string; email: string; name: string }): Promise<UserRecord> {
   await ensureDatabase();
   const id = randomUUID();
   const now = nowIso();
@@ -98,82 +103,18 @@ export async function createUser(input: UserInsert): Promise<UserRecord> {
   if (usingPostgres()) {
     const sql = getPg();
     const rows = await sql<Record<string, unknown>[]>`
-      INSERT INTO users (id, email, password_hash, name, created_at, updated_at)
-      VALUES (${id}, ${input.email}, ${input.passwordHash}, ${input.name}, ${now}, ${now})
+      INSERT INTO users (id, firebase_uid, email, name, created_at, updated_at)
+      VALUES (${id}, ${input.uid}, ${input.email}, ${input.name}, ${now}, ${now})
+      ON CONFLICT (firebase_uid) DO UPDATE SET email = EXCLUDED.email, updated_at = EXCLUDED.updated_at
       RETURNING *
     `;
     return stripPassword(mapUserRow(rows[0]))!;
   }
 
-  const db = getSqlite();
-  db.prepare(
-    `INSERT INTO users (id, email, password_hash, name, created_at, updated_at)
-     VALUES (@id, @email, @password_hash, @name, @created_at, @updated_at)`,
-  ).run({ id, email: input.email, password_hash: input.passwordHash, name: input.name, created_at: now, updated_at: now });
-  return stripPassword((await findUserByEmail(input.email))!)!;
-}
-
-export async function findUserByEmail(email: string): Promise<UserWithPassword | null> {
-  await ensureDatabase();
-  if (usingPostgres()) {
-    const sql = getPg();
-    const rows = await sql<Record<string, unknown>[]>`SELECT * FROM users WHERE email = ${email} LIMIT 1`;
-    return rows[0] ? mapUserRow(rows[0]) : null;
-  }
-  const row = getSqlite().prepare('SELECT * FROM users WHERE email = ? LIMIT 1').get(email) as Record<string, unknown> | undefined;
-  return row ? mapUserRow(row) : null;
-}
-
-export async function createSession(userId: string, sessionToken: string) {
-  await ensureDatabase();
-  const id = randomUUID();
-  const now = nowIso();
-  const expiresAt = new Date(Date.now() + 1000 * 60 * 60 * 24 * 30).toISOString();
-
-  if (usingPostgres()) {
-    const sql = getPg();
-    await sql`INSERT INTO sessions (id, user_id, session_token, expires_at, created_at)
-              VALUES (${id}, ${userId}, ${sessionToken}, ${expiresAt}, ${now})`;
-    return;
-  }
-
   getSqlite()
-    .prepare('INSERT INTO sessions (id, user_id, session_token, expires_at, created_at) VALUES (?, ?, ?, ?, ?)')
-    .run(id, userId, sessionToken, expiresAt, now);
-}
-
-export async function deleteSession(sessionToken: string) {
-  await ensureDatabase();
-  if (usingPostgres()) {
-    const sql = getPg();
-    await sql`DELETE FROM sessions WHERE session_token = ${sessionToken}`;
-    return;
-  }
-  getSqlite().prepare('DELETE FROM sessions WHERE session_token = ?').run(sessionToken);
-}
-
-export async function findUserBySessionToken(sessionToken: string): Promise<UserRecord | null> {
-  await ensureDatabase();
-  if (usingPostgres()) {
-    const sql = getPg();
-    const rows = await sql<Record<string, unknown>[]>`
-      SELECT u.*
-      FROM sessions s
-      JOIN users u ON u.id = s.user_id
-      WHERE s.session_token = ${sessionToken} AND s.expires_at > NOW()
-      LIMIT 1
-    `;
-    return rows[0] ? stripPassword(mapUserRow(rows[0])) : null;
-  }
-  const row = getSqlite()
-    .prepare(
-      `SELECT u.* FROM sessions s
-       JOIN users u ON u.id = s.user_id
-       WHERE s.session_token = ? AND s.expires_at > ?
-       LIMIT 1`,
-    )
-    .get(sessionToken, nowIso()) as Record<string, unknown> | undefined;
-  return row ? stripPassword(mapUserRow(row)) : null;
+    .prepare('INSERT INTO users (id, firebase_uid, email, name, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)')
+    .run(id, input.uid, input.email, input.name, now, now);
+  return (await getUserByFirebaseUid(input.uid))!;
 }
 
 export async function createAsset(input: AssetInsert): Promise<AssetRecord> {
@@ -225,6 +166,42 @@ export async function createAsset(input: AssetInsert): Promise<AssetRecord> {
     updated_at: now,
   });
   return (await getAssetByIdForUser(input.userId, id))!;
+}
+
+export async function updateAssetMetadata(
+  userId: string,
+  assetId: string,
+  metadata: { title: string; description: string; keywords: string[] },
+): Promise<AssetRecord | null> {
+  await ensureDatabase();
+  const now = nowIso();
+  const keywordsJson = JSON.stringify(metadata.keywords);
+
+  if (usingPostgres()) {
+    const sql = getPg();
+    const rows = await sql<Record<string, unknown>[]>`
+      UPDATE assets
+      SET title = ${metadata.title}, description = ${metadata.description}, keywords_json = ${keywordsJson}::jsonb, updated_at = ${now}
+      WHERE id = ${assetId} AND user_id = ${userId}
+      RETURNING *
+    `;
+    return rows[0] ? mapAssetRow(rows[0]) : null;
+  }
+
+  getSqlite()
+    .prepare(
+      `UPDATE assets SET title = @title, description = @description, keywords_json = @keywords_json, updated_at = @updated_at
+       WHERE id = @id AND user_id = @user_id`,
+    )
+    .run({
+      id: assetId,
+      user_id: userId,
+      title: metadata.title,
+      description: metadata.description,
+      keywords_json: keywordsJson,
+      updated_at: now,
+    });
+  return getAssetByIdForUser(userId, assetId);
 }
 
 export async function listAssetsForUser(userId: string) {

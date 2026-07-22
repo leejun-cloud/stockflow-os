@@ -3,6 +3,7 @@
 import { useEffect, useState, useTransition } from 'react';
 import type { AgencyCredentialRecord, AssetRecord, ContributorProfile, SubmissionRecord, UserRecord } from '@/lib/domain';
 import type { W8BenFields } from '@/lib/tax/w8ben';
+import { signIn, signOutClient, signUp } from '@/lib/firebase/client';
 
 type AssetWithSubmissions = AssetRecord & { submissions: SubmissionRecord[] };
 type SafeCredential = Omit<AgencyCredentialRecord, 'encryptedPassword'>;
@@ -158,27 +159,34 @@ export function StockDashboardClient({ currentUser, initialAssets }: Props) {
   async function handleAuth(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const form = event.currentTarget;
-    const formData = new FormData(form);
-    const payload = Object.fromEntries(formData.entries());
-    const endpoint = mode === 'register' ? '/api/auth/register' : '/api/auth/login';
-    const response = await fetch(endpoint, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    });
-    const data = await response.json();
-    if (!response.ok) {
-      setMessage(data.error || '인증 실패');
-      return;
+    const f = new FormData(form);
+    const email = String(f.get('email') || '');
+    const password = String(f.get('password') || '');
+    const name = String(f.get('name') || '');
+    try {
+      const idToken = mode === 'register' ? await signUp(email, password) : await signIn(email, password);
+      const response = await fetch('/api/auth/session', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ idToken, name }),
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        setMessage(data.error || '인증 실패');
+        return;
+      }
+      setUser(data.user);
+      setMessage(mode === 'register' ? '가입 및 로그인 완료' : '로그인 완료');
+      form.reset();
+      const nextAssets = await fetchAssets();
+      setAssets(nextAssets);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : '인증 실패');
     }
-    setUser(data.user);
-    setMessage(mode === 'register' ? '가입 및 로그인 완료' : '로그인 완료');
-    form.reset();
-    const nextAssets = await fetchAssets();
-    setAssets(nextAssets);
   }
 
   async function handleLogout() {
+    await signOutClient().catch(() => {});
     await fetch('/api/auth/session', { method: 'DELETE' });
     setUser(null);
     setAssets([]);
